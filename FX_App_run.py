@@ -133,10 +133,24 @@ def optimize_portfolio(posterior_results, total_capital=4000, max_position=1000)
         return sum(model.x[i] for i in model.pairs) <= total_capital
     model.CapitalConstraint = pyo.Constraint(rule=capital_limit_rule)
     
-    solver = pyo.SolverFactory('glpk')
-    solver.solve(model)
-    
-    return {i: pyo.value(model.x[i]) for i in model.pairs}
+    # ---------------------------------------------------------
+    # DUAL SOLVER LOGIC: Try Gurobi first, fallback to IPOPT
+    # ---------------------------------------------------------
+    solver_used = "None"
+    try:
+        solver = pyo.SolverFactory('gurobi')
+        if solver.available(exception_flag=False):
+            solver.solve(model)
+            solver_used = "Gurobi"
+        else:
+            raise ValueError("Gurobi unavailable")
+    except Exception:
+        solver = pyo.SolverFactory('ipopt')
+        solver.solve(model)
+        solver_used = "Ipopt (Open-Source Fallback)"
+        
+    allocations = {i: pyo.value(model.x[i]) for i in model.pairs}
+    return allocations, solver_used
 
 # ==========================================
 # 5. STREAMLIT DASHBOARD
@@ -174,7 +188,10 @@ if st.button("Run Daily Quantitative Pipeline"):
         progress_bar.progress((i + 1) / len(FX_MAP))
         
     st.write("### 2. Pyomo Fractional Kelly Allocations")
-    allocations_usd = optimize_portfolio(posteriors, total_capital=4000, max_position=1000)
+    
+    # Run optimization and capture which solver was used
+    allocations_usd, solver_used = optimize_portfolio(posteriors, total_capital=4000, max_position=1000)
+    st.info(f"Optimization computed successfully using: **{solver_used}**")
     
     execution_plan = []
     for pair, alloc_usd in allocations_usd.items():
@@ -204,4 +221,4 @@ if 'execution_plan' in st.session_state and len(st.session_state['execution_plan
                 st.success(f"Filled: {trade['OANDA Units']} units of {trade['Pair']}")
             else:
                 st.error(f"Failed to execute {trade['Pair']}")
-        del st.session_state['execution_plan']  
+        del st.session_state['execution_plan']
