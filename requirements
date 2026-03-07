@@ -1,9 +1,8 @@
 streamlit
-pymc>=5.0.0
+pymc
 pyomo
 yfinance
 pandas
 numpy
 requests
 matplotlib
-pyarrow
