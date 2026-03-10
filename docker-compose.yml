@@ -4,10 +4,14 @@ services:
     ports:
       - "8000:8000"
       - "9090:9090"
+    volumes:
+      - fx-data:/app/data
     environment:
       - OANDA_API_KEY=${OANDA_API_KEY}
       - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
       - OANDA_ENVIRONMENT=practice
+      - FX_ENGINE_API_KEY=${FX_ENGINE_API_KEY:-}
+      - FX_ENGINE_DATA_DIR=/app/data
       - SCHEDULER_ENABLED=true
       - SCHEDULER_RUN_HOUR_UTC=14
       - SCHEDULER_AUTO_EXECUTE=false
@@ -46,3 +50,7 @@ services:
       - ./config/grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       - prometheus
+
+volumes:
+  fx-data:
+    driver: local

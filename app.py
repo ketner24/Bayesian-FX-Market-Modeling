@@ -137,6 +137,18 @@ class ReconcileRequest(BaseModel):
 
 # ── Helper ───────────────────────────────────────────────────────
 
+def _get_journal() -> TradeJournal:
+    """Safely get the trade journal from app state."""
+    journal = getattr(app.state, "journal", None)
+    if journal is None:
+        # Fallback: create a journal on the fly (should only happen in tests)
+        cfg = get_config()
+        cfg.data_dir.mkdir(parents=True, exist_ok=True)
+        journal = TradeJournal(cfg.journal_path)
+        app.state.journal = journal
+    return journal
+
+
 def _make_broker(creds: CredentialsInput | ExecuteInput | ReconcileRequest) -> OandaBroker:
     settings = OandaSettings(
         api_key=creds.api_key,
@@ -203,7 +215,7 @@ def pipeline_run(creds: CredentialsInput) -> dict:
     """
     cfg = get_config()
     broker = _make_broker(creds)
-    journal: TradeJournal = app.state.journal
+    journal = _get_journal()
 
     result: PipelineOutput = run_pipeline(broker, cfg, auto_execute=False)
     journal.record_pipeline_run(result.__dict__)
@@ -222,7 +234,7 @@ def pipeline_execute(req: ExecuteInput) -> dict:
     """
     cfg = get_config()
     broker = _make_broker(req)
-    journal: TradeJournal = app.state.journal
+    journal = _get_journal()
 
     # Pre-flight reconciliation
     if req.reconcile_first:
@@ -271,7 +283,7 @@ def reconcile(req: ReconcileRequest) -> dict:
     """
     cfg = get_config()
     broker = _make_broker(req)
-    journal: TradeJournal = app.state.journal
+    journal = _get_journal()
 
     result = reconcile_positions(
         broker=broker,
@@ -325,7 +337,7 @@ def backtest_run(params: BacktestRequest) -> dict:
         )
 
         # Log backtest to journal
-        journal: TradeJournal = app.state.journal
+        journal = _get_journal()
         journal.record("backtest_completed", {
             "window_type": params.window_type,
             "rolling_window_days": params.rolling_window_days,
@@ -362,7 +374,7 @@ def backtest_run(params: BacktestRequest) -> dict:
 def close_all_positions(creds: CredentialsInput) -> dict:
     """Emergency: close all open positions."""
     broker = _make_broker(creds)
-    journal: TradeJournal = app.state.journal
+    journal = _get_journal()
 
     results = broker.close_all_positions()
     for r in results:
@@ -390,7 +402,7 @@ def close_all_positions(creds: CredentialsInput) -> dict:
 @app.get("/journal/recent")
 def journal_recent(n: int = 50) -> dict:
     """Query the last N trade journal entries."""
-    journal: TradeJournal = app.state.journal
+    journal = _get_journal()
     entries = journal.read_recent(n=min(n, 500))
     return {"count": len(entries), "entries": entries}
 
@@ -398,6 +410,6 @@ def journal_recent(n: int = 50) -> dict:
 @app.get("/journal/pipeline/{pipeline_id}")
 def journal_by_pipeline(pipeline_id: str) -> dict:
     """Query all journal entries for a specific pipeline run."""
-    journal: TradeJournal = app.state.journal
+    journal = _get_journal()
     entries = journal.read_by_pipeline(pipeline_id)
     return {"pipeline_id": pipeline_id, "count": len(entries), "entries": entries}
