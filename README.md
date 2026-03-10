@@ -1,90 +1,192 @@
-# Bayesian FX Trading Engine v2.0
+# Bayesian FX Trading Engine v4.0
 
-## Architecture Change: Streamlit → FastAPI
+A production-grade quantitative FX trading pipeline built on Bayesian Structural Time Series inference, covariance-aware portfolio optimization, and OANDA execution with full risk management, audit logging, and monitoring.
 
-**Why Streamlit is wrong for this project:**
+## Architecture
 
-| Problem | Streamlit | FastAPI (this version) |
-|---|---|---|
-| Stale inference | `@st.cache_resource` freezes MCMC results forever | Fresh inference every pipeline run |
-| No scheduling | Requires a human clicking a button | APScheduler runs daily at 14:00 UTC |
-| No audit trail | Ephemeral UI state | Structured logging, JSON responses |
-| Stateful trading in reactive framework | Session state fights the re-run model | Explicit request/response, no hidden state |
-| Deployment | Single process, UI + logic coupled | API and dashboard deploy independently |
-| Testing | Can't unit test Streamlit callbacks easily | Standard pytest against API endpoints |
-
-**How to run:**
-```bash
-pip install -r requirements.txt
-python main.py                    # Starts API on port 8000
-# Then: POST /pipeline/run with OANDA credentials
+```
+┌─────────────┐     ┌───────────────┐     ┌──────────────┐     ┌─────────────┐
+│  Reconcile  │ ──► │  Data Layer   │ ──► │  Inference   │ ──► │  Optimizer  │
+│ (positions) │     │  (yfinance)   │     │ (PyMC BSTS)  │     │ (Pyomo MVO) │
+└─────────────┘     └───────────────┘     └──────────────┘     └─────────────┘
+                                                                      │
+       ┌──────────────────────────────────────────────────────────────┘
+       ▼
+┌──────────────┐     ┌───────────┐     ┌──────────────────┐     ┌──────────┐
+│    Risk      │ ──► │ Execution │ ──► │  Trade Journal   │ ──► │ Grafana  │
+│ Management   │     │  (OANDA)  │     │  (JSONL audit)   │     │  + Prom  │
+└──────────────┘     └───────────┘     └──────────────────┘     └──────────┘
 ```
 
-**For a dashboard**, add Plotly Dash, Grafana, or a React frontend that calls the API. The key insight is: *the trading engine should never depend on whether someone is looking at a UI*.
+## Quick Start
 
----
+```bash
+# 1. Clone and install
+pip install -e ".[dev,scheduling,monitoring]"
 
-## Bug Fixes Applied
+# 2. Configure
+cp .env.example .env
+# Edit .env with your OANDA credentials
 
-### Fix 1: Regression Betas Now Used (CRITICAL)
-**Before:** `posterior_mu = trace.posterior['drift'].mean()` — threw away the entire regression.
-**After:** Expected return = E[drift] + E[beta] @ x_last, where x_last is the most recent macro observation. The horseshoe prior and macro features now actually influence trade decisions.
+# 3. Run
+python main.py
+# API: http://localhost:8000
+# Docs: http://localhost:8000/docs
+```
 
-### Fix 2: Student-T Variance Corrected
-**Before:** `posterior_var = sigma ** 2` — understated variance by 3x.
-**After:** `corrected_variance = sigma² × ν/(ν−2)` — for ν=3, this is `σ² × 3`. All pairs now show their true risk.
+### Docker (recommended for production)
 
-### Fix 3: Optimizer Handles Direction Natively
-**Before:** `abs(model.mu[i])` made the optimizer direction-blind.
-**After:** Separate `x_long` and `x_short` variables with signed expected returns. The optimizer itself decides whether to go long or short based on the sign of mu.
+```bash
+docker-compose up -d
+# API:        http://localhost:8000
+# Grafana:    http://localhost:3000 (admin/admin)
+# Prometheus: http://localhost:9091
+```
 
-### Fix 4: Full Covariance Matrix
-**Before:** Independent variance terms — EUR/USD and GBP/USD both max-allocated despite ~0.8 correlation.
-**After:** `x^T Σ x` using the sample covariance matrix. Correlated pairs are penalized together.
-
-### Fix 5: Renamed from "BSTS" to Bayesian Linear Regression
-A true BSTS has time-varying trend and seasonality. This model is a static Bayesian regression. The name now reflects reality.
-
-### Fix 6: Regularized Normal Prior (Replaced Horseshoe)
-With 2-3 predictors, a horseshoe prior is overkill and causes convergence issues. Replaced with `Normal(0, 0.05)` which provides light regularization and converges reliably.
-
-### Fix 7: MCMC Samples Increased
-**Before:** 300 draws / 300 tune — chains almost certainly haven't converged.
-**After:** 1000 draws / 1000 tune with `target_accept=0.90`. This is the minimum for reliable posterior estimates.
-
-### Fix 8: Pair-Specific Macro Features
-**Before:** Same US-only features (VIX, 10Y) for all 5 pairs.
-**After:** USD/CAD gets crude oil (CL=F), AUD/USD gets gold (GC=F). Extensible to ECB/BOJ/RBA rate proxies when data sources are added.
-
-### Fix 9: Correct Label
-**Before:** "Expected 5-Day Drift" — no 5-day aggregation exists in the code.
-**After:** "daily_expected_return" — matches what the model actually estimates.
-
-### Fix 10: No Stale Cache
-**Before:** `@st.cache_resource` persisted MCMC results across sessions indefinitely.
-**After:** Every pipeline run performs fresh inference on fresh data. No caching of stochastic model outputs.
-
-### Fix 11: Risk Guards Added
-**Before:** No per-trade risk limit, no stop-loss, no drawdown protection.
-**After:**
-- Max drawdown guard: pipeline refuses to trade if NAV drops below 95% of starting capital
-- Per-trade risk percentage: 2% of capital per trade (configurable)
-- Gross exposure cap: total allocations ≤ capital
-
----
+Grafana auto-provisions with the FX Engine dashboard — no manual setup required.
 
 ## API Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/health` | Health check |
-| POST | `/pipeline/run` | Run full pipeline, return trade plan |
-| POST | `/orders/execute` | Execute trades from a previous plan |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | No | Liveness check |
+| GET | `/config` | Yes | Current configuration (secrets redacted) |
+| POST | `/pipeline/run` | Yes | Run inference + optimization, return trade plan |
+| POST | `/pipeline/execute` | Yes | Run pipeline AND execute trades |
+| POST | `/reconcile` | Yes | Check account state, close stale positions |
+| POST | `/backtest/run` | Yes | Walk-forward backtest (expanding or rolling) |
+| POST | `/positions/close-all` | Yes | Emergency: close all open positions |
+| GET | `/journal/recent?n=50` | Yes | Query last N trade journal entries |
+| GET | `/journal/pipeline/{id}` | Yes | Query journal for specific pipeline run |
 
-## Future Improvements
-- Add ECB, BOJ, RBA rate proxies as macro features
-- Implement proper stop-loss orders via OANDA's trailing stop API
-- Add convergence diagnostics (R-hat, ESS) and reject runs that don't converge
-- Add a local linear trend (GaussianRandomWalk) to make this a proper BSTS model
-- Implement walk-forward backtesting before live deployment
-- Add Prometheus metrics for monitoring
+Authentication is via the `X-API-Key` header. Set `FX_ENGINE_API_KEY` in your `.env` to enable; leave blank for development.
+
+### Example: Run Pipeline
+
+```bash
+curl -X POST http://localhost:8000/pipeline/run \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-engine-api-key" \
+  -d '{
+    "api_key": "your-oanda-key",
+    "account_id": "your-account-id",
+    "environment": "practice"
+  }'
+```
+
+### Example: Rolling Window Backtest
+
+```bash
+curl -X POST http://localhost:8000/backtest/run \
+  -H "Content-Type: application/json" \
+  -d '{
+    "min_train_days": 120,
+    "hold_days": 5,
+    "rebalance_every": 5,
+    "window_type": "rolling",
+    "rolling_window_days": 180
+  }'
+```
+
+## Project Structure
+
+```
+fx_engine/
+├── __init__.py              # Package version
+├── app.py                   # FastAPI application + all endpoints
+├── config.py                # Pydantic-settings centralized configuration
+├── logging_config.py        # JSON structured logging (ELK/Datadog ready)
+├── middleware.py             # API key auth + rate limiting
+├── journal.py               # Append-only JSONL trade audit log
+├── pipeline.py              # Orchestrator: data → inference → optimize → risk → execute
+├── reconciliation.py        # Pre-flight position reconciliation
+├── scheduler.py             # APScheduler daily automation
+├── py.typed                 # PEP 561 type stub marker
+├── broker/
+│   └── oanda.py             # OANDA v20 REST client with retry + trailing stops
+├── data/
+│   └── pipeline.py          # Market data fetch, validation, ATR computation
+├── inference/
+│   └── bayesian.py          # BSTS model: GaussianRandomWalk + convergence diagnostics
+├── optimization/
+│   └── portfolio.py         # Covariance-aware MVO with Pyomo
+├── risk/
+│   └── __init__.py          # Drawdown breaker, ATR stops, position sizing
+├── backtesting/
+│   └── __init__.py          # Walk-forward backtest (expanding + rolling windows)
+├── monitoring/
+│   └── __init__.py          # Prometheus metrics
+tests/
+├── conftest.py              # Shared fixtures
+├── test_config.py           # Configuration + integration tests
+├── test_data.py             # Data pipeline tests
+├── test_journal.py          # Trade journal tests
+├── test_middleware.py        # Auth + rate limiting tests
+├── test_optimization.py     # Portfolio optimization tests
+├── test_risk.py             # Risk management tests
+config/
+├── prometheus.yml           # Prometheus scrape config
+├── grafana/
+│   ├── fx-engine-dashboard.json    # Pre-built Grafana dashboard
+│   └── provisioning/               # Auto-provisioning for datasources + dashboards
+.github/
+└── workflows/
+    └── ci.yml               # GitHub Actions: lint → typecheck → test → docker build
+```
+
+## What Changed From v3
+
+### 1. API Security
+API key authentication via `X-API-Key` header with rate limiting (60 req/min). Configurable via `FX_ENGINE_API_KEY` — leave blank to disable for development.
+
+### 2. Trade Journal (Audit Log)
+Every pipeline run, trade execution, reconciliation, and backtest is recorded as a JSON line in `data/trade_journal.jsonl`. This provides a complete, immutable audit trail queryable via the `/journal/*` endpoints. Each entry includes timestamps, pipeline IDs for tracing, and full execution details.
+
+### 3. Position Reconciliation
+Before every execution run, the engine now checks the OANDA account state: verifies open positions are in our trading universe, checks margin utilization, and optionally closes unknown/stale positions. This prevents orphaned positions from failed previous runs.
+
+### 4. Rolling Window Backtesting
+The backtester now supports both expanding windows (all past data) and rolling fixed-width windows. Rolling windows are better for detecting regime changes and avoiding fitting to stale data. Configure via the `window_type` and `rolling_window_days` parameters.
+
+### 5. Grafana Dashboard Template
+A complete Grafana dashboard JSON ships with the repo, auto-provisioned via docker-compose. Panels cover engine health (NAV, exposure, risk), inference quality (R-hat, ESS, convergence rate), expected returns, trade activity, and solver usage.
+
+### 6. CI/CD Pipeline
+GitHub Actions workflow: ruff lint → mypy type-check → pytest with coverage → Docker build + smoke test. Runs on push to main/develop and on all PRs.
+
+### 7. Comprehensive Test Suite
+Tests split into focused modules: data pipeline, risk management, optimization, journal, middleware, and configuration. Coverage of edge cases: drawdown breaker, unconverged pairs, rate limiting, missing prices, ATR fallbacks, and more.
+
+## Configuration
+
+All settings configurable via environment variables. See `.env.example` for the full list.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FX_ENGINE_API_KEY` | *(blank)* | API authentication key (blank = auth disabled) |
+| `INFERENCE_USE_LOCAL_TREND` | `true` | GaussianRandomWalk (true BSTS) vs static drift |
+| `INFERENCE_MAX_RHAT` | `1.05` | Reject inference if R-hat exceeds this |
+| `TRADING_STOP_LOSS_ATR_MULTIPLE` | `2.0` | Trailing stop = ATR × this multiple |
+| `TRADING_MAX_DRAWDOWN_PCT` | `0.05` | Circuit breaker: block trades if NAV drops 5% |
+| `SCHEDULER_AUTO_EXECUTE` | `false` | Whether scheduled runs auto-submit orders |
+
+## Testing
+
+```bash
+# Unit tests
+pytest tests/ -v
+
+# With coverage
+pytest tests/ -v --cov=fx_engine --cov-report=html
+
+# Specific module
+pytest tests/test_risk.py -v
+```
+
+## Remaining Future Work
+
+- Source actual ECB/BOJ/RBA rate differential data (currently using equity index proxies)
+- WebSocket streaming for real-time price monitoring
+- Redis-backed rate limiting for multi-instance deployments
+- Alertmanager integration for Prometheus alerts (convergence failures, drawdown events)
+- Position reconciliation scheduling (independent of pipeline runs)

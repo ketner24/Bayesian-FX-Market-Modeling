@@ -1,0 +1,48 @@
+services:
+  fx-engine:
+    build: .
+    ports:
+      - "8000:8000"
+      - "9090:9090"
+    environment:
+      - OANDA_API_KEY=${OANDA_API_KEY}
+      - OANDA_ACCOUNT_ID=${OANDA_ACCOUNT_ID}
+      - OANDA_ENVIRONMENT=practice
+      - SCHEDULER_ENABLED=true
+      - SCHEDULER_RUN_HOUR_UTC=14
+      - SCHEDULER_AUTO_EXECUTE=false
+      - METRICS_ENABLED=true
+      - METRICS_PORT=9090
+      - INFERENCE_MCMC_DRAWS=1000
+      - INFERENCE_MCMC_TUNE=1000
+      - INFERENCE_MCMC_CHAINS=4
+      - INFERENCE_USE_LOCAL_TREND=true
+      - FX_ENGINE_LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - fx-engine
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/fx-engine-dashboard.json
+    volumes:
+      - ./config/grafana/fx-engine-dashboard.json:/var/lib/grafana/dashboards/fx-engine-dashboard.json
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus

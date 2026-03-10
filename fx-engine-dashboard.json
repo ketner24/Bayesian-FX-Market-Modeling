@@ -1,0 +1,328 @@
+{
+  "annotations": { "list": [] },
+  "description": "Bayesian FX Trading Engine — real-time monitoring of pipeline health, inference quality, portfolio risk, and trade execution.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Engine Health",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "Pipeline Runs (24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "red" },
+              { "value": 1, "color": "green" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "increase(fx_pipeline_runs_total{status=\"success\"}[24h])",
+          "legendFormat": "Successful Runs"
+        }
+      ]
+    },
+    {
+      "title": "Pipeline Errors (24h)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 1, "color": "orange" },
+              { "value": 3, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "increase(fx_pipeline_runs_total{status=\"error\"}[24h])",
+          "legendFormat": "Errors"
+        }
+      ]
+    },
+    {
+      "title": "Account NAV",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "red" },
+              { "value": 3800, "color": "orange" },
+              { "value": 4000, "color": "green" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "fx_account_nav_usd",
+          "legendFormat": "NAV"
+        }
+      ]
+    },
+    {
+      "title": "Gross Exposure",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 3000, "color": "orange" },
+              { "value": 4000, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "fx_portfolio_gross_exposure_usd",
+          "legendFormat": "Exposure"
+        }
+      ]
+    },
+    {
+      "title": "Total Risk",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 100, "color": "orange" },
+              { "value": 200, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "fx_trade_risk_total_usd",
+          "legendFormat": "Risk $"
+        }
+      ]
+    },
+    {
+      "title": "Pipeline Duration",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 300, "color": "orange" },
+              { "value": 600, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(fx_pipeline_duration_seconds_bucket[24h]))",
+          "legendFormat": "p95 Duration"
+        }
+      ]
+    },
+    {
+      "title": "Inference Quality",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "R-hat by Pair",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "pointSize": 5,
+            "showPoints": "auto"
+          },
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 1.02, "color": "orange" },
+              { "value": 1.05, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "fx_inference_rhat",
+          "legendFormat": "{{pair}}"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" }
+      }
+    },
+    {
+      "title": "Bulk ESS by Pair",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "red" },
+              { "value": 400, "color": "orange" },
+              { "value": 800, "color": "green" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "fx_inference_ess_bulk_min",
+          "legendFormat": "{{pair}}"
+        }
+      ]
+    },
+    {
+      "title": "Expected Returns by Pair",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "drawStyle": "bars",
+            "fillOpacity": 40
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "fx_expected_return",
+          "legendFormat": "{{pair}}"
+        }
+      ]
+    },
+    {
+      "title": "Convergence Rate",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 14 },
+      "targets": [
+        {
+          "expr": "sum(increase(fx_inference_convergence_total{converged=\"true\"}[7d]))",
+          "legendFormat": "Converged"
+        },
+        {
+          "expr": "sum(increase(fx_inference_convergence_total{converged=\"false\"}[7d]))",
+          "legendFormat": "Failed"
+        }
+      ]
+    },
+    {
+      "title": "Inference Duration by Pair",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 14 },
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(fx_inference_duration_seconds_bucket[24h]))",
+          "legendFormat": "{{pair}} p95"
+        }
+      ]
+    },
+    {
+      "title": "Trading Activity",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "title": "Trades Executed (7d)",
+      "type": "bargauge",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 23 },
+      "targets": [
+        {
+          "expr": "increase(fx_trades_executed_total{status=\"filled\"}[7d])",
+          "legendFormat": "{{pair}} {{direction}}"
+        }
+      ]
+    },
+    {
+      "title": "Solver Usage",
+      "type": "piechart",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 23 },
+      "targets": [
+        {
+          "expr": "increase(fx_solver_used_total[30d])",
+          "legendFormat": "{{solver}}"
+        }
+      ]
+    },
+    {
+      "title": "Failed Trades (7d)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 23 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 1, "color": "orange" },
+              { "value": 5, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(fx_trades_executed_total{status=\"failed\"}[7d]))",
+          "legendFormat": "Failed Trades"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["fx-engine", "trading", "bayesian"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "utc",
+  "title": "FX Trading Engine",
+  "uid": "fx-engine-v4",
+  "version": 1
+}
